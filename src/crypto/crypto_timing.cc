@@ -56,6 +56,20 @@ bool FastTimingSafeEqual(Local<Value> receiver,
                          // NOLINTNEXTLINE(runtime/references)
                          FastApiCallbackOptions& options) {
   HandleScope scope(options.isolate);
+  if (!IsAnyBufferSource(a_obj)) {
+    TRACK_V8_FAST_API_CALL("crypto.timingSafeEqual.error");
+    THROW_ERR_INVALID_ARG_TYPE(options.isolate,
+                               "The \"buf1\" argument must be an instance of "
+                               "ArrayBuffer, Buffer, TypedArray, or DataView.");
+    return false;
+  }
+  if (!IsAnyBufferSource(b_obj)) {
+    TRACK_V8_FAST_API_CALL("crypto.timingSafeEqual.error");
+    THROW_ERR_INVALID_ARG_TYPE(options.isolate,
+                               "The \"buf2\" argument must be an instance of "
+                               "ArrayBuffer, Buffer, TypedArray, or DataView.");
+    return false;
+  }
   ArrayBufferViewContents<uint8_t> a(a_obj);
   ArrayBufferViewContents<uint8_t> b(b_obj);
   if (a.length() != b.length()) {
@@ -68,16 +82,18 @@ bool FastTimingSafeEqual(Local<Value> receiver,
   return CRYPTO_memcmp(a.data(), b.data(), a.length()) == 0;
 }
 
-static CFunction fast_equal(CFunction::Make(FastTimingSafeEqual));
+static CFunction fast_timing_safe_equal(CFunction::Make(FastTimingSafeEqual));
 
 void Initialize(Environment* env, Local<Object> target) {
-  SetFastMethodNoSideEffect(
-      env->context(), target, "timingSafeEqual", TimingSafeEqual, &fast_equal);
+  SetFastMethodNoSideEffect(env->context(),
+                            target,
+                            "timingSafeEqual",
+                            TimingSafeEqual,
+                            &fast_timing_safe_equal);
 }
 void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(TimingSafeEqual);
-  registry->Register(FastTimingSafeEqual);
-  registry->Register(fast_equal.GetTypeInfo());
+  registry->Register(fast_timing_safe_equal);
 }
 }  // namespace Timing
 

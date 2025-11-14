@@ -501,7 +501,7 @@ Maybe<bool> ValueSerializer::WriteObject(DirectHandle<Object> object) {
       if (!id_map_.Find(view) && !treat_array_buffer_views_as_host_objects_) {
         DirectHandle<JSArrayBuffer> buffer(
             InstanceTypeChecker::IsJSTypedArray(instance_type)
-                ? Cast<JSTypedArray>(view)->GetBuffer()
+                ? Cast<JSTypedArray>(view)->GetBuffer(isolate_)
                 : direct_handle(Cast<JSArrayBuffer>(view->buffer()), isolate_));
         if (!WriteJSReceiver(buffer).FromMaybe(false)) return Nothing<bool>();
       }
@@ -654,8 +654,17 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
     case JS_DATA_VIEW_TYPE:
     case JS_RAB_GSAB_DATA_VIEW_TYPE:
       return WriteJSArrayBufferView(Cast<JSArrayBufferView>(*receiver));
-    case JS_ERROR_TYPE:
-      return WriteJSError(Cast<JSObject>(receiver));
+    case JS_ERROR_TYPE: {
+      DirectHandle<JSObject> js_error = Cast<JSObject>(receiver);
+      Maybe<bool> is_host_object = IsHostObject(js_error);
+      if (is_host_object.IsNothing()) {
+        return is_host_object;
+      }
+      if (is_host_object.FromJust()) {
+        return WriteHostObject(js_error);
+      }
+      return WriteJSError(js_error);
+    }
     case JS_SHARED_ARRAY_TYPE:
       return WriteJSSharedArray(Cast<JSSharedArray>(receiver));
     case JS_SHARED_STRUCT_TYPE:
@@ -1528,7 +1537,8 @@ Maybe<base::Vector<const uint8_t>> ValueDeserializer::ReadRawBytes(
 
 Maybe<base::Vector<const base::uc16>> ValueDeserializer::ReadRawTwoBytes(
     size_t size) {
-  if (size > static_cast<size_t>(end_ - position_) ||
+  if (!IsAligned(reinterpret_cast<uintptr_t>(position_), 2) ||
+      size > static_cast<size_t>(end_ - position_) ||
       size % sizeof(base::uc16) != 0) {
     return Nothing<base::Vector<const base::uc16>>();
   }
@@ -1934,7 +1944,8 @@ MaybeDirectHandle<JSDate> ValueDeserializer::ReadJSDate() {
   if (!ReadDouble().To(&value)) return MaybeDirectHandle<JSDate>();
   uint32_t id = next_id_++;
   DirectHandle<JSDate> date;
-  if (!JSDate::New(isolate_->date_function(), isolate_->date_function(), value)
+  if (!JSDate::New(isolate_, isolate_->date_function(),
+                   isolate_->date_function(), value)
            .ToHandle(&date)) {
     return MaybeDirectHandle<JSDate>();
   }

@@ -27,6 +27,7 @@ const EXPECTED_EVENTS = {
           url: 'https://nodejs.org/en',
           method: 'GET',
           headers: {},
+          hasPostData: false,
         },
         timestamp: 1000,
         wallTime: 1000,
@@ -42,7 +43,9 @@ const EXPECTED_EVENTS = {
           url: 'https://nodejs.org/en',
           status: 200,
           statusText: '',
-          headers: { host: 'nodejs.org' }
+          headers: { host: 'nodejs.org' },
+          mimeType: 'text/html',
+          charset: 'utf-8'
         }
       },
       expected: {
@@ -53,13 +56,20 @@ const EXPECTED_EVENTS = {
           url: 'https://nodejs.org/en',
           status: 200,
           statusText: '',
-          headers: { host: 'nodejs.org' }
+          headers: { host: 'nodejs.org' },
+          mimeType: 'text/html',
+          charset: 'utf-8'
         }
       }
     },
     {
       name: 'dataReceived',
-      // Network.dataReceived is buffered until Network.streamResourceContent is invoked.
+      // Network.dataReceived is buffered until Network.streamResourceContent/Network.getResponseBody is invoked.
+      skip: true,
+    },
+    {
+      name: 'dataSent',
+      // Network.dataSent is buffered until Network.getRequestPostData is invoked.
       skip: true,
     },
     {
@@ -76,6 +86,34 @@ const EXPECTED_EVENTS = {
         timestamp: 1000,
         type: 'Document',
         errorText: 'Failed to load resource'
+      }
+    },
+    {
+      name: 'webSocketCreated',
+      params: {
+        requestId: 'websocket-id-1',
+        url: 'ws://example.com:8080',
+      }
+
+    },
+    {
+      name: 'webSocketHandshakeResponseReceived',
+      params: {
+        requestId: 'websocket-id-1',
+        response: {
+          status: 101,
+          statusText: 'Switching Protocols',
+          headers: {},
+        },
+        timestamp: 1000,
+      }
+    },
+    {
+      name: 'webSocketClosed',
+      params: {
+        requestId: 'websocket-id-1',
+        timestamp: 1000,
+
       }
     },
   ]
@@ -114,7 +152,7 @@ const runAsyncTest = async () => {
         continue;
       }
       session.on(`${domain}.${event.name}`, common.mustCall(({ params }) => {
-        if (event.name === 'requestWillBeSent') {
+        if (event.name === 'requestWillBeSent' || event.name === 'webSocketCreated') {
           // Initiator is automatically captured and contains caller info.
           // No need to validate it.
           delete params.initiator;

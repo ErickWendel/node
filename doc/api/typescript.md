@@ -2,7 +2,17 @@
 
 <!-- YAML
 changes:
-  - version: v23.6.0
+  - version: v25.2.0
+    pr-url: https://github.com/nodejs/node/pull/60600
+    description: Type stripping is now stable.
+  - version:
+     - v24.3.0
+     - v22.18.0
+    pr-url: https://github.com/nodejs/node/pull/58643
+    description: Type stripping no longer emits an experimental warning.
+  - version:
+     - v23.6.0
+     - v22.18.0
     pr-url: https://github.com/nodejs/node/pull/56350
     description: Type stripping is enabled by default.
   - version: v22.7.0
@@ -12,7 +22,7 @@ changes:
 
 <!--introduced_in=v22.6.0-->
 
-> Stability: 1.2 - Release candidate
+> Stability: 2 - Stable
 
 ## Enabling
 
@@ -53,6 +63,10 @@ To use TypeScript with full support for all TypeScript features, including
 
 <!-- YAML
 added: v22.6.0
+changes:
+  - version: v25.2.0
+    pr-url: https://github.com/nodejs/node/pull/60600
+    description: Type stripping is now stable.
 -->
 
 By default Node.js will execute TypeScript files that contains only
@@ -61,7 +75,7 @@ Node.js will replace TypeScript syntax with whitespace,
 and no type checking is performed.
 To enable the transformation of non erasable TypeScript syntax, which requires JavaScript code generation,
 such as `enum` declarations, parameter properties use the flag [`--experimental-transform-types`][].
-To disable this feature, use the flag [`--no-experimental-strip-types`][].
+To disable this feature, use the flag [`--no-strip-types`][].
 
 Node.js ignores `tsconfig.json` files and therefore
 features that depend on settings within `tsconfig.json`,
@@ -151,10 +165,10 @@ namespace A {
 }
 ```
 
-Since Decorators are currently a [TC39 Stage 3 proposal](https://github.com/tc39/proposal-decorators)
-and will soon be supported by the JavaScript engine,
+Since Decorators are currently a [TC39 Stage 3 proposal](https://github.com/tc39/proposal-decorators),
 they are not transformed and will result in a parser error.
-This is a temporary limitation and will be resolved in the future.
+Node.js does not provide polyfills and thus will not support decorators until
+they are supported natively in JavaScript.
 
 In addition, Node.js does not read `tsconfig.json` files and does not support
 features that depend on settings within `tsconfig.json`, such as paths or
@@ -199,8 +213,8 @@ are enabled by default.
 ### Type stripping in dependencies
 
 To discourage package authors from publishing packages written in TypeScript,
-Node.js will by default refuse to handle TypeScript files inside folders under
-a `node_modules` path.
+Node.js refuses to handle TypeScript files inside folders under a `node_modules`
+path.
 
 ### Paths aliases
 
@@ -212,7 +226,7 @@ with `#`.
 [ES Modules]: esm.md
 [Full TypeScript support]: #full-typescript-support
 [`--experimental-transform-types`]: cli.md#--experimental-transform-types
-[`--no-experimental-strip-types`]: cli.md#--no-experimental-strip-types
+[`--no-strip-types`]: cli.md#--no-strip-types
 [`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`]: errors.md#err_unsupported_typescript_syntax
 [`tsconfig` "paths"]: https://www.typescriptlang.org/tsconfig/#paths
 [`tsx`]: https://tsx.is/

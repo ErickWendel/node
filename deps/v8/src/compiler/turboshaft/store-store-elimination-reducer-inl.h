@@ -10,6 +10,7 @@
 #include "src/compiler/turboshaft/assembler.h"
 #include "src/compiler/turboshaft/graph.h"
 #include "src/compiler/turboshaft/operations.h"
+#include "src/compiler/turboshaft/opmasks.h"
 #include "src/compiler/turboshaft/sidetable.h"
 #include "src/compiler/turboshaft/snapshot-table.h"
 #include "src/compiler/turboshaft/uniform-reducer-adapter.h"
@@ -325,10 +326,11 @@ class RedundantStoreAnalysis {
           // TODO(nicohartmann@): Use the new effect flags to distinguish heap
           // access once available.
           const bool is_on_heap_store = store.kind.tagged_base;
-          const bool is_field_store = !store.index().valid();
+          const bool is_fixed_offset_store = !store.index().valid();
           const uint8_t size = store.stored_rep.SizeInBytes();
-          // For now we consider only stores of fields of objects on the heap.
-          if (is_on_heap_store && is_field_store) {
+          // For now we consider only stores of fixed offsets of objects on the
+          // heap.
+          if (is_on_heap_store && is_fixed_offset_store) {
             bool is_eliminable_store = false;
             switch (table_.GetObservability(store.base(), store.offset, size)) {
               case StoreObservability::kUnobservable:
@@ -374,9 +376,9 @@ class RedundantStoreAnalysis {
                 DCHECK(!store1.index().valid());
 
                 const ConstantOp* c0 =
-                    graph_.Get(store0.value()).TryCast<ConstantOp>();
+                    graph_.Get(store0.value()).TryCast<Opmask::kHeapConstant>();
                 const ConstantOp* c1 =
-                    graph_.Get(store1.value()).TryCast<ConstantOp>();
+                    graph_.Get(store1.value()).TryCast<Opmask::kHeapConstant>();
 
                 // TODO(dmercadier): for now, we only apply this optimization
                 // when storing read-only values, because otherwise the GC will
@@ -385,8 +387,7 @@ class RedundantStoreAnalysis {
                 // this might work for any object. To do this, we might need to
                 // delay this optimization to later (instruction selector for
                 // instance).
-                if (c0 && c1 && c0->kind == ConstantOp::Kind::kHeapObject &&
-                    c1->kind == ConstantOp::Kind::kHeapObject &&
+                if (store0.base() == store1.base() && c0 && c1 &&
                     store1.offset - store0.offset == 4 &&
                     HeapLayout::InReadOnlySpace(*c0->handle()) &&
                     HeapLayout::InReadOnlySpace(*c1->handle())) {
@@ -415,11 +416,16 @@ class RedundantStoreAnalysis {
           // TODO(nicohartmann@): Use the new effect flags to distinguish heap
           // access once available.
           const bool is_on_heap_load = load.kind.tagged_base;
-          const bool is_field_load = !load.index().valid();
+          const bool is_fixed_offset_load = !load.index().valid();
           // For now we consider only loads of fields of objects on the heap.
-          if (is_on_heap_load && is_field_load) {
-            table_.MarkPotentiallyAliasingStoresAsObservable(load.base(),
-                                                             load.offset);
+          if (is_on_heap_load) {
+            if (is_fixed_offset_load) {
+              table_.MarkPotentiallyAliasingStoresAsObservable(load.base(),
+                                                               load.offset);
+            } else {
+              // A dynamically indexed load might alias any fixed offset.
+              table_.MarkAllStoresAsObservable();
+            }
           }
           break;
         }

@@ -986,11 +986,7 @@ void IndexOfString(const FunctionCallbackInfo<Value>& args) {
   size_t result = haystack_length;
 
   if (enc == UCS2) {
-    String::Value needle_value(isolate, needle);
-    if (*needle_value == nullptr) {
-      return args.GetReturnValue().Set(-1);
-    }
-
+    TwoByteValue needle_value(isolate, needle);
     if (haystack_length < 2 || needle_value.length() < 1) {
       return args.GetReturnValue().Set(-1);
     }
@@ -1011,34 +1007,37 @@ void IndexOfString(const FunctionCallbackInfo<Value>& args) {
                                     offset / 2,
                                     is_forward);
     } else {
-      result =
-          nbytes::SearchString(reinterpret_cast<const uint16_t*>(haystack),
-                               haystack_length / 2,
-                               reinterpret_cast<const uint16_t*>(*needle_value),
-                               needle_value.length(),
-                               offset / 2,
-                               is_forward);
+      result = nbytes::SearchString(reinterpret_cast<const uint16_t*>(haystack),
+                                    haystack_length / 2,
+                                    needle_value.out(),
+                                    needle_value.length(),
+                                    offset / 2,
+                                    is_forward);
     }
     result *= 2;
   } else if (enc == UTF8) {
-    String::Utf8Value needle_value(isolate, needle);
+    Utf8Value needle_value(isolate, needle);
     if (*needle_value == nullptr)
       return args.GetReturnValue().Set(-1);
+    CHECK_GE(needle_length, needle_value.length());
 
-    result =
-        nbytes::SearchString(reinterpret_cast<const uint8_t*>(haystack),
-                             haystack_length,
-                             reinterpret_cast<const uint8_t*>(*needle_value),
-                             needle_length,
-                             offset,
-                             is_forward);
+    result = nbytes::SearchString(
+        reinterpret_cast<const uint8_t*>(haystack),
+        haystack_length,
+        reinterpret_cast<const uint8_t*>(needle_value.out()),
+        needle_length,
+        offset,
+        is_forward);
   } else if (enc == LATIN1) {
     uint8_t* needle_data = node::UncheckedMalloc<uint8_t>(needle_length);
     if (needle_data == nullptr) {
       return args.GetReturnValue().Set(-1);
     }
-    needle->WriteOneByte(
-        isolate, needle_data, 0, needle_length, String::NO_NULL_TERMINATION);
+    StringBytes::Write(isolate,
+                       reinterpret_cast<char*>(needle_data),
+                       needle_length,
+                       needle,
+                       enc);
 
     result = nbytes::SearchString(reinterpret_cast<const uint8_t*>(haystack),
                                   haystack_length,
@@ -1061,8 +1060,9 @@ void IndexOfBuffer(const FunctionCallbackInfo<Value>& args) {
 
   enum encoding enc = static_cast<enum encoding>(args[3].As<Int32>()->Value());
 
-  THROW_AND_RETURN_UNLESS_BUFFER(Environment::GetCurrent(args), args[0]);
-  THROW_AND_RETURN_UNLESS_BUFFER(Environment::GetCurrent(args), args[1]);
+  Environment* env = Environment::GetCurrent(args);
+  THROW_AND_RETURN_UNLESS_BUFFER(env, args[0]);
+  THROW_AND_RETURN_UNLESS_BUFFER(env, args[1]);
   ArrayBufferViewContents<char> haystack_contents(args[0]);
   ArrayBufferViewContents<char> needle_contents(args[1]);
   int64_t offset_i64 = args[2].As<Integer>()->Value();
@@ -1301,11 +1301,7 @@ static void Btoa(const FunctionCallbackInfo<Value>& args) {
         simdutf::binary_to_base64(ext->data(), ext->length(), buffer.out());
   } else if (input->IsOneByte()) {
     MaybeStackBuffer<uint8_t> stack_buf(input->Length());
-    input->WriteOneByte(env->isolate(),
-                        stack_buf.out(),
-                        0,
-                        input->Length(),
-                        String::NO_NULL_TERMINATION);
+    input->WriteOneByteV2(env->isolate(), 0, input->Length(), stack_buf.out());
 
     size_t expected_length =
         simdutf::base64_length_from_binary(input->Length());
@@ -1316,10 +1312,10 @@ static void Btoa(const FunctionCallbackInfo<Value>& args) {
                                   input->Length(),
                                   buffer.out());
   } else {
-    String::Value value(env->isolate(), input);
+    TwoByteValue value(env->isolate(), input);
     MaybeStackBuffer<char> stack_buf(value.length());
     size_t out_len = simdutf::convert_utf16_to_latin1(
-        reinterpret_cast<const char16_t*>(*value),
+        reinterpret_cast<const char16_t*>(value.out()),
         value.length(),
         stack_buf.out());
     if (out_len == 0) {  // error
@@ -1361,11 +1357,8 @@ static void Atob(const FunctionCallbackInfo<Value>& args) {
         ext->data(), ext->length(), buffer.out(), simdutf::base64_default);
   } else if (input->IsOneByte()) {
     MaybeStackBuffer<uint8_t> stack_buf(input->Length());
-    input->WriteOneByte(args.GetIsolate(),
-                        stack_buf.out(),
-                        0,
-                        input->Length(),
-                        String::NO_NULL_TERMINATION);
+    input->WriteOneByteV2(
+        args.GetIsolate(), 0, input->Length(), stack_buf.out());
     const char* data = reinterpret_cast<const char*>(*stack_buf);
     size_t expected_length =
         simdutf::maximal_binary_length_from_base64(data, input->Length());
@@ -1373,8 +1366,8 @@ static void Atob(const FunctionCallbackInfo<Value>& args) {
     buffer.SetLength(expected_length);
     result = simdutf::base64_to_binary(data, input->Length(), buffer.out());
   } else {  // 16-bit case
-    String::Value value(env->isolate(), input);
-    auto data = reinterpret_cast<const char16_t*>(*value);
+    TwoByteValue value(env->isolate(), input);
+    auto data = reinterpret_cast<const char16_t*>(value.out());
     size_t expected_length =
         simdutf::maximal_binary_length_from_base64(data, value.length());
     buffer.AllocateSufficientStorage(expected_length);
@@ -1525,6 +1518,14 @@ uint32_t FastWriteString(Local<Value> receiver,
                          uint32_t max_length,
                          // NOLINTNEXTLINE(runtime/references)
                          FastApiCallbackOptions& options) {
+  // Just a heads up... this is a v8 fast api function. The use of
+  // FastOneByteString has some caveats. Specifically, a GC occurring
+  // between the time the FastOneByteString is created and the time
+  // we use it below can cause the FastOneByteString to become invalid
+  // and produce garbage data. This is not a problem here because we
+  // are not performing any allocations or other operations that would
+  // trigger a GC before the FastOneByteString is used. Take care when
+  // modifying this code to ensure that no operations would trigger a GC.
   HandleScope handle_scope(options.isolate);
   SPREAD_BUFFER_ARG(dst_obj, dst);
   CHECK(offset <= dst_length);
@@ -1634,20 +1635,16 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(SetBufferPrototype);
 
   registry->Register(SlowByteLengthUtf8);
-  registry->Register(fast_byte_length_utf8.GetTypeInfo());
-  registry->Register(FastByteLengthUtf8);
+  registry->Register(fast_byte_length_utf8);
   registry->Register(SlowCopy);
-  registry->Register(fast_copy.GetTypeInfo());
-  registry->Register(FastCopy);
+  registry->Register(fast_copy);
   registry->Register(Compare);
-  registry->Register(FastCompare);
-  registry->Register(fast_compare.GetTypeInfo());
+  registry->Register(fast_compare);
   registry->Register(CompareOffset);
   registry->Register(Fill);
   registry->Register(IndexOfBuffer);
   registry->Register(SlowIndexOfNumber);
-  registry->Register(FastIndexOfNumber);
-  registry->Register(fast_index_of_number.GetTypeInfo());
+  registry->Register(fast_index_of_number);
   registry->Register(IndexOfString);
 
   registry->Register(Swap16);
@@ -1668,12 +1665,9 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(SlowWriteString<ASCII>);
   registry->Register(SlowWriteString<LATIN1>);
   registry->Register(SlowWriteString<UTF8>);
-  registry->Register(FastWriteString<ASCII>);
-  registry->Register(fast_write_string_ascii.GetTypeInfo());
-  registry->Register(FastWriteString<LATIN1>);
-  registry->Register(fast_write_string_latin1.GetTypeInfo());
-  registry->Register(FastWriteString<UTF8>);
-  registry->Register(fast_write_string_utf8.GetTypeInfo());
+  registry->Register(fast_write_string_ascii);
+  registry->Register(fast_write_string_latin1);
+  registry->Register(fast_write_string_utf8);
   registry->Register(StringWrite<ASCII>);
   registry->Register(StringWrite<BASE64>);
   registry->Register(StringWrite<BASE64URL>);
